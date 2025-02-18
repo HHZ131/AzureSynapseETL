@@ -1,0 +1,17 @@
+{
+	"name": "external-prep",
+	"properties": {
+		"content": {
+			"query": "-- Create database if not exists\nIF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'ExternalDB')\nBEGIN\n    CREATE DATABASE ExternalDB;\nEND\nGO\n\nUSE ExternalDB;\nGO\n\n-- Create an external table to extract selected columns from the CSV files\nIF NOT EXISTS (SELECT * FROM sys.external_file_formats WHERE name = 'SynapseDelimitedTextFormat') \n\tCREATE EXTERNAL FILE FORMAT [SynapseDelimitedTextFormat] \n\tWITH ( FORMAT_TYPE = DELIMITEDTEXT ,\n\t       FORMAT_OPTIONS (\n\t\t\t FIELD_TERMINATOR = ',',\n\t\t\t STRING_DELIMITER = '\"',\n\t\t\t FIRST_ROW = 2,\n\t\t\t USE_TYPE_DEFAULT = FALSE\n\t\t\t))\nGO\n\nIF NOT EXISTS (SELECT * FROM sys.external_data_sources WHERE name = 'report_hhz131_dfs_core_windows_net') \n\tCREATE EXTERNAL DATA SOURCE [report_hhz131_dfs_core_windows_net] \n\tWITH (\n\t\tLOCATION = 'abfss://report@hhz131.dfs.core.windows.net' \n\t)\nGO\n\nCREATE EXTERNAL TABLE dbo.AgencyCompensation (\n\t[ID] bigint,\n\t[Level] nvarchar(4000),\n\t[ Base Salary ] nvarchar(4000),\n\t[ Insured Base Salary ] nvarchar(4000),\n\t[ Basic Performance ] nvarchar(4000),\n\t[Performance_Pre-owned] nvarchar(4000),\n\t[Commission_Rate_Pre-owned] nvarchar(4000),\n\t[ Commission_Pre-owned ] nvarchar(4000),\n\t[Performance_Rental] nvarchar(4000),\n\t[Commission_Rate_Rental] nvarchar(4000),\n\t[ Commission_Rental ] nvarchar(4000),\n\t[Performance_New] nvarchar(4000),\n\t[Commission_Rate_New] nvarchar(4000),\n\t[ Commission_New ] nvarchar(4000),\n\t[Performance_Other] nvarchar(4000),\n\t[Commission_Rate_Other] nvarchar(4000),\n\t[ Commission_Other ] nvarchar(4000),\n\t[ Business Partner Commission ] nvarchar(4000),\n\t[ Team Performance ] nvarchar(4000),\n\t[Management Commission Rate] nvarchar(4000),\n\t[ Management Commission ] nvarchar(4000),\n\t[ Total Salary ] nvarchar(4000),\n\t[ Delayed Payment Balance_Open ] nvarchar(4000),\n\t[ Delayed Payment ] nvarchar(4000),\n\t[ Back Payment ] nvarchar(4000),\n\t[ Net Payment ] nvarchar(4000),\n\t[ Delayed Payment Balance_Close ] nvarchar(4000),\n\t[ Other Income ] nvarchar(4000),\n\t[ Other Deduction ] nvarchar(4000),\n\t[ 401K ] nvarchar(4000),\n\t[ Advance Salary Balance_Open ] nvarchar(4000),\n\t[ Advance ] nvarchar(4000),\n\t[ Repayment ] nvarchar(4000),\n\t[ Advance Salary Balance_Close ] nvarchar(4000),\n\t[ Fixed_Salary ] nvarchar(4000),\n\t[ Commission ] nvarchar(4000),\n\t[ Total ] nvarchar(4000)\n\t)\n\tWITH (\n\tLOCATION = 'agency-compensation/2023-01/01_salary_submission_details_v1.csv',\n\tDATA_SOURCE = [report_hhz131_dfs_core_windows_net],\n\tFILE_FORMAT = [SynapseDelimitedTextFormat]\n\t)\nGO\n\nSELECT TOP 100 * FROM dbo.AgencyCompensation\nGO",
+			"metadata": {
+				"language": "sql"
+			},
+			"currentConnection": {
+				"databaseName": "ExternalDB",
+				"poolName": "Built-in"
+			},
+			"resultLimit": 5000
+		},
+		"type": "SqlQuery"
+	}
+}

@@ -1,0 +1,17 @@
+{
+	"name": "load-agency-fact",
+	"properties": {
+		"content": {
+			"query": "CREATE PROCEDURE LoadAgencyCompensationData\nAS\nBEGIN\n    -- Turn off the showplan to prevent showing execution plans in the results\n    SET SHOWPLAN_XML OFF;\n    \n    BEGIN TRY\n        -- Truncate the fact table before inserting new data\n        TRUNCATE TABLE dbo.fact_agencycompensation;\n\n        -- Insert data from staging table to fact table\n        INSERT INTO dbo.fact_agencycompensation\n        SELECT * \n        FROM dbo.staging_agencycompensation;\n\n        -- Optionally, return the data from the fact table (for verification purposes)\n        SELECT * \n        FROM dbo.fact_agencycompensation;\n\n        -- Log a message indicating the operation was successful\n        PRINT 'Data successfully loaded into fact_agencycompensation';\n\n    END TRY\n    BEGIN CATCH\n        -- If an error occurs, capture the error message and log it\n        PRINT 'Error occurred: ' + ERROR_MESSAGE();\n        -- Optionally, raise the error so it can be caught outside this procedure\n        THROW;\n    END CATCH;\nEND;",
+			"metadata": {
+				"language": "sql"
+			},
+			"currentConnection": {
+				"databaseName": "venture_dashboard",
+				"poolName": "venture_dashboard"
+			},
+			"resultLimit": 5000
+		},
+		"type": "SqlQuery"
+	}
+}

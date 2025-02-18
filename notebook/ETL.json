@@ -1,0 +1,212 @@
+{
+	"name": "ETL",
+	"properties": {
+		"nbformat": 4,
+		"nbformat_minor": 2,
+		"bigDataPool": {
+			"referenceName": "VentureETL",
+			"type": "BigDataPoolReference"
+		},
+		"sessionProperties": {
+			"driverMemory": "28g",
+			"driverCores": 4,
+			"executorMemory": "28g",
+			"executorCores": 4,
+			"numExecutors": 2,
+			"runAsWorkspaceSystemIdentity": false,
+			"conf": {
+				"spark.dynamicAllocation.enabled": "false",
+				"spark.dynamicAllocation.minExecutors": "2",
+				"spark.dynamicAllocation.maxExecutors": "2",
+				"spark.autotune.trackingId": "a0042c49-4830-48e1-9e24-c5dc15d694e9"
+			}
+		},
+		"metadata": {
+			"saveOutput": true,
+			"synapse_widget": {
+				"version": "0.1"
+			},
+			"enableDebugMode": false,
+			"language_info": {
+				"name": "python"
+			},
+			"a365ComputeOptions": {
+				"id": "/subscriptions/76bf0df3-12c8-4ada-a009-ef4a13d9a2fd/resourceGroups/ke-holdings/providers/Microsoft.Synapse/workspaces/venture-monthly-report-etl/bigDataPools/VentureETL",
+				"name": "VentureETL",
+				"type": "Spark",
+				"endpoint": "https://venture-monthly-report-etl.dev.azuresynapse.net/livyApi/versions/2019-11-01-preview/sparkPools/VentureETL",
+				"auth": {
+					"type": "AAD",
+					"authResource": "https://dev.azuresynapse.net",
+					"authHeader": null
+				},
+				"sparkVersion": "3.4",
+				"nodeCount": 10,
+				"cores": 4,
+				"memory": 28,
+				"extraHeader": null
+			},
+			"sessionKeepAliveTimeout": 30
+		},
+		"cells": [
+			{
+				"cell_type": "code",
+				"source": [
+					"from pyspark.sql import SparkSession\r\n",
+					"\r\n",
+					"spark = SparkSession.builder.getOrCreate()\r\n",
+					"\r\n",
+					"'''\r\n",
+					"# Define storage path (replace with your storage details)\r\n",
+					"storage_account = \"hhz131\"\r\n",
+					"container_name = \"report\"\r\n",
+					"file_path = \"agency-compensation/2023-01/01_salary_submission_details_v1.csv\"\r\n",
+					"adls_path = f\"abfss://{container_name}@{storage_account}.dfs.core.windows.net/{file_path}\"\r\n",
+					"# Read CSV\r\n",
+					"df = spark.read.csv(adls_path, header=True, inferSchema=True)\r\n",
+					"df = df.selectexpr(\"Level\", \r\n",
+					"                    \"Performance_PreOwned\", \r\n",
+					"                    \"Performance_Rental\", \r\n",
+					"                    \"Performance_New\", \r\n",
+					"                    \"Performance_Other\", \r\n",
+					"                    \"Team_Performance\",\r\n",
+					"                    \"Management_Commission\", \r\n",
+					"                    \"Fixed_Salary\", \r\n",
+					"                    \"Commission\", \r\n",
+					"                    \"Total\")\r\n",
+					"'''\r\n",
+					"\r\n",
+					"#Read data from lake database instead\r\n",
+					"table_name = \"`Database1`.`agency_202301`\"\r\n",
+					"df = spark.sql(f\"\"\"SELECT Level, \r\n",
+					"                        Performance_PreOwned, \r\n",
+					"                        Performance_Rental, \r\n",
+					"                        Performance_New, \r\n",
+					"                        Performance_Other, \r\n",
+					"                        Team_Performance,\r\n",
+					"                        Management_Commission, \r\n",
+					"                        Fixed_Salary, \r\n",
+					"                        Commission, \r\n",
+					"                        Total from {table_name}\"\"\")\r\n",
+					"\r\n",
+					"#Data Cleaning\r\n",
+					"from pyspark.sql.functions import when, col, trim, regexp_replace\r\n",
+					"from pyspark.sql.types import DecimalType, IntegerType\r\n",
+					"\r\n",
+					"value_columns = df.columns[1:]\r\n",
+					"for c in value_columns:\r\n",
+					"    df = df.withColumn(c, regexp_replace(col(c), \",\", \"\"))\r\n",
+					"    df = df.withColumn(c, when(trim(col(c)) == \"-\", 0).otherwise(trim(col(c))).cast(DecimalType(10,2)))\r\n",
+					"    df = df.fillna(0, subset=c)\r\n",
+					"\r\n",
+					"#Map Level to clustered Level\r\n",
+					"from pyspark.sql.functions import udf\r\n",
+					"from pyspark.sql.types import StringType\r\n",
+					"\r\n",
+					"def map_value(val):\r\n",
+					"    mapping_dict = {\r\n",
+					"        'A0': 'A0',\r\n",
+					"        'A1': 'A1-A4',\r\n",
+					"        'A2': 'A1-A4',\r\n",
+					"        'A3': 'A1-A4',\r\n",
+					"        'A4': 'A1-A4',\r\n",
+					"        'A5': 'A5-A10',\r\n",
+					"        'A6': 'A5-A10',\r\n",
+					"        'A7': 'A5-A10',\r\n",
+					"        'A8': 'A5-A10',\r\n",
+					"        'A9': 'A5-A10',\r\n",
+					"        'A10': 'A5-A10',\r\n",
+					"        'M': 'M',\r\n",
+					"        'M1': 'M',\r\n",
+					"        'M2': 'M',\r\n",
+					"        'M3': 'M',\r\n",
+					"        'M4': 'M',\r\n",
+					"        'M5': 'M',\r\n",
+					"        'M6': 'M',\r\n",
+					"        'M7': 'M',\r\n",
+					"        'M8': 'M',\r\n",
+					"        'M9': 'M',\r\n",
+					"        'M10': 'M',\r\n",
+					"        'S': 'S',\r\n",
+					"        'BP': 'Admin',\r\n",
+					"        'Owner': 'Partner'\r\n",
+					"    }\r\n",
+					"    return mapping_dict.get(val, val)\r\n",
+					"\r\n",
+					"map_udf = udf(map_value, StringType())\r\n",
+					"df = df.withColumn(\"Level_Clustered\", map_udf(df[\"Level\"]))\r\n",
+					"\r\n",
+					"#Add one more column for total sales\r\n",
+					"from pyspark.sql.functions import col\r\n",
+					"df = df.withColumn(\"Total_Sales\", col('Performance_PreOwned') + col('Performance_Rental') + col('Performance_New') + col('Performance_Other'))\r\n",
+					"\r\n",
+					"#group by clustered level\r\n",
+					"from pyspark.sql.functions import sum, count\r\n",
+					"\r\n",
+					"#aggregate\r\n",
+					"columns_to_sum = [\"Team_Performance\",\r\n",
+					"                    \"Management_Commission\", \r\n",
+					"                    \"Fixed_Salary\", \r\n",
+					"                    \"Commission\",\r\n",
+					"                    \"Total_Sales\", \r\n",
+					"                    \"Total\"]\r\n",
+					"\r\n",
+					"df_grouped = df.groupBy(\"Level_Clustered\").agg(count(\"Level_Clustered\").alias(\"Head_Count\"),*[sum(c).alias(c) for c in columns_to_sum])\r\n",
+					"df_grouped.show()"
+				],
+				"execution_count": 5
+			},
+			{
+				"cell_type": "code",
+				"metadata": {
+					"jupyter": {
+						"source_hidden": false,
+						"outputs_hidden": false
+					},
+					"nteract": {
+						"transient": {
+							"deleting": false
+						}
+					}
+				},
+				"source": [
+					"#cast to match the schema of staging table       #TODO: maybe consider a automated process to match the schema to database?\r\n",
+					"from pyspark.sql.types import DecimalType, IntegerType\r\n",
+					"\r\n",
+					"# Cast Head_Count to Integer and cast other numeric columns to Decimal(30,2)\r\n",
+					"df_grouped = df_grouped.select(\r\n",
+					"    col(\"Level_Clustered\"), \r\n",
+					"    col(\"Head_Count\").cast(IntegerType()).alias(\"Head_Count\"),\r\n",
+					"    *[col(c).cast(DecimalType(30, 2)).alias(c) for c in df_grouped.columns if c not in [\"Level_Clustered\", \"Head_Count\"]]\r\n",
+					")\r\n",
+					"\r\n",
+					"# Check the new schema\r\n",
+					"df_grouped.printSchema()"
+				],
+				"execution_count": 7
+			},
+			{
+				"cell_type": "code",
+				"metadata": {
+					"jupyter": {
+						"source_hidden": false,
+						"outputs_hidden": false
+					},
+					"nteract": {
+						"transient": {
+							"deleting": false
+						}
+					}
+				},
+				"source": [
+					"#write to dedicated sql pool staging table\r\n",
+					"import com.microsoft.spark.sqlanalytics\r\n",
+					"df_grouped.write \\\r\n",
+					"            .mode(\"overwrite\") \\\r\n",
+					"            .synapsesql(\"venture_dashboard.dbo.staging_agencycompensation\")"
+				],
+				"execution_count": 13
+			}
+		]
+	}
+}

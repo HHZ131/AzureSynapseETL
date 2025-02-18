@@ -1,0 +1,17 @@
+{
+	"name": "Dedicated_Pool_Setup",
+	"properties": {
+		"content": {
+			"query": "SET showplan_xml OFF\nGO;\n\n-- Drop staging table if it exists\nIF EXISTS (SELECT * FROM sys.tables WHERE name = 'staging_agencycompensation')\nDROP TABLE staging_agencycompensation;\n\n-- Create staging table\nCREATE TABLE staging_agencycompensation (\n    Level_Clustered NVARCHAR(100),\n    Head_Count INT NOT NULL,\n    Team_Performance DECIMAL(30,2),\n    Management_Commission DECIMAL(30,2), \n    Fixed_Salary DECIMAL(30,2), \n    Commission DECIMAL(30,2),\n    Total_Sales DECIMAL(30,2), \n    Total DECIMAL(30,2)\n)\nWITH (\n    DISTRIBUTION = ROUND_ROBIN,\n    HEAP\n);\n\n-- Drop fact table if it exists\nIF EXISTS (SELECT * FROM sys.tables WHERE name = 'fact_agencycompensation')\nDROP TABLE fact_agencycompensation;\n\n-- Create fact table\nCREATE TABLE fact_agencycompensation (\n    Level_Clustered NVARCHAR(100),\n    Head_Count INT NOT NULL,\n    Team_Performance DECIMAL(30,2),\n    Management_Commission DECIMAL(30,2), \n    Fixed_Salary DECIMAL(30,2), \n    Commission DECIMAL(30,2),\n    Total_Sales DECIMAL(30,2), \n    Total DECIMAL(30,2)\n)\nWITH (\n    DISTRIBUTION = ROUND_ROBIN,\n    CLUSTERED COLUMNSTORE INDEX\n);\n",
+			"metadata": {
+				"language": "sql"
+			},
+			"currentConnection": {
+				"databaseName": "venture_dashboard",
+				"poolName": "venture_dashboard"
+			},
+			"resultLimit": 5000
+		},
+		"type": "SqlQuery"
+	}
+}
