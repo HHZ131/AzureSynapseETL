@@ -1,0 +1,1187 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"workspaceName": {
+			"type": "string",
+			"metadata": "Workspace name",
+			"defaultValue": "venture-monthly-report-etl"
+		},
+		"venture-monthly-report-etl-WorkspaceDefaultSqlServer_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'venture-monthly-report-etl-WorkspaceDefaultSqlServer'",
+			"defaultValue": "Integrated Security=False;Encrypt=True;Connection Timeout=30;Data Source=tcp:venture-monthly-report-etl.sql.azuresynapse.net,1433;Initial Catalog=@{linkedService().DBName}"
+		},
+		"venture-monthly-report-etl-WorkspaceDefaultStorage_properties_typeProperties_url": {
+			"type": "string",
+			"defaultValue": "https://hhz131.dfs.core.windows.net"
+		}
+	},
+	"variables": {
+		"workspaceId": "[concat('Microsoft.Synapse/workspaces/', parameters('workspaceName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('workspaceName'), '/Agency_Compensation')]",
+			"type": "Microsoft.Synapse/workspaces/pipelines",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"activities": [
+					{
+						"name": "ETL_Raw_to_Stage",
+						"type": "SynapseNotebook",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"notebook": {
+								"referenceName": "ETL",
+								"type": "NotebookReference"
+							},
+							"snapshot": true,
+							"sparkPool": {
+								"referenceName": "VentureETL",
+								"type": "BigDataPoolReference"
+							},
+							"executorSize": "Small",
+							"conf": {
+								"spark.dynamicAllocation.enabled": false
+							},
+							"driverSize": "Small"
+						}
+					},
+					{
+						"name": "agency_stage_to_fact",
+						"type": "SqlPoolStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "ETL_Raw_to_Stage",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"sqlPool": {
+							"referenceName": "venture_dashboard",
+							"type": "SqlPoolReference"
+						},
+						"typeProperties": {
+							"storedProcedureName": "[dbo].[LoadAgencyCompensationData]"
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"annotations": [],
+				"lastPublishTime": "2025-02-15T02:12:27Z"
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/notebooks/ETL')]",
+				"[concat(variables('workspaceId'), '/bigDataPools/VentureETL')]",
+				"[concat(variables('workspaceId'), '/sqlPools/venture_dashboard')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/venture-monthly-report-etl-WorkspaceDefaultSqlServer')]",
+			"type": "Microsoft.Synapse/workspaces/linkedServices",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"parameters": {
+					"DBName": {
+						"type": "String"
+					}
+				},
+				"annotations": [],
+				"type": "AzureSqlDW",
+				"typeProperties": {
+					"connectionString": "[parameters('venture-monthly-report-etl-WorkspaceDefaultSqlServer_connectionString')]"
+				},
+				"connectVia": {
+					"referenceName": "AutoResolveIntegrationRuntime",
+					"type": "IntegrationRuntimeReference"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/integrationRuntimes/AutoResolveIntegrationRuntime')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/venture-monthly-report-etl-WorkspaceDefaultStorage')]",
+			"type": "Microsoft.Synapse/workspaces/linkedServices",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"annotations": [],
+				"type": "AzureBlobFS",
+				"typeProperties": {
+					"url": "[parameters('venture-monthly-report-etl-WorkspaceDefaultStorage_properties_typeProperties_url')]"
+				},
+				"connectVia": {
+					"referenceName": "AutoResolveIntegrationRuntime",
+					"type": "IntegrationRuntimeReference"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/integrationRuntimes/AutoResolveIntegrationRuntime')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/AutoResolveIntegrationRuntime')]",
+			"type": "Microsoft.Synapse/workspaces/integrationRuntimes",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"type": "Managed",
+				"typeProperties": {
+					"computeProperties": {
+						"location": "AutoResolve",
+						"dataFlowProperties": {
+							"computeType": "General",
+							"coreCount": 8,
+							"timeToLive": 0
+						}
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/WorkspaceSystemIdentity')]",
+			"type": "Microsoft.Synapse/workspaces/credentials",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"type": "ManagedIdentity",
+				"typeProperties": {}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/Dedicated_Pool_Setup')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "SET showplan_xml OFF\nGO;\n\n-- Drop staging table if it exists\nIF EXISTS (SELECT * FROM sys.tables WHERE name = 'staging_agencycompensation')\nDROP TABLE staging_agencycompensation;\n\n-- Create staging table\nCREATE TABLE staging_agencycompensation (\n    Level_Clustered NVARCHAR(100),\n    Head_Count INT NOT NULL,\n    Team_Performance DECIMAL(30,2),\n    Management_Commission DECIMAL(30,2), \n    Fixed_Salary DECIMAL(30,2), \n    Commission DECIMAL(30,2),\n    Total_Sales DECIMAL(30,2), \n    Total DECIMAL(30,2)\n)\nWITH (\n    DISTRIBUTION = ROUND_ROBIN,\n    HEAP\n);\n\n-- Drop fact table if it exists\nIF EXISTS (SELECT * FROM sys.tables WHERE name = 'fact_agencycompensation')\nDROP TABLE fact_agencycompensation;\n\n-- Create fact table\nCREATE TABLE fact_agencycompensation (\n    Level_Clustered NVARCHAR(100),\n    Head_Count INT NOT NULL,\n    Team_Performance DECIMAL(30,2),\n    Management_Commission DECIMAL(30,2), \n    Fixed_Salary DECIMAL(30,2), \n    Commission DECIMAL(30,2),\n    Total_Sales DECIMAL(30,2), \n    Total DECIMAL(30,2)\n)\nWITH (\n    DISTRIBUTION = ROUND_ROBIN,\n    CLUSTERED COLUMNSTORE INDEX\n);\n",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"databaseName": "venture_dashboard",
+						"poolName": "venture_dashboard"
+					},
+					"resultLimit": 5000
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/external-prep')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "-- Create database if not exists\nIF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'ExternalDB')\nBEGIN\n    CREATE DATABASE ExternalDB;\nEND\nGO\n\nUSE ExternalDB;\nGO\n\n-- Create an external table to extract selected columns from the CSV files\nIF NOT EXISTS (SELECT * FROM sys.external_file_formats WHERE name = 'SynapseDelimitedTextFormat') \n\tCREATE EXTERNAL FILE FORMAT [SynapseDelimitedTextFormat] \n\tWITH ( FORMAT_TYPE = DELIMITEDTEXT ,\n\t       FORMAT_OPTIONS (\n\t\t\t FIELD_TERMINATOR = ',',\n\t\t\t STRING_DELIMITER = '\"',\n\t\t\t FIRST_ROW = 2,\n\t\t\t USE_TYPE_DEFAULT = FALSE\n\t\t\t))\nGO\n\nIF NOT EXISTS (SELECT * FROM sys.external_data_sources WHERE name = 'report_hhz131_dfs_core_windows_net') \n\tCREATE EXTERNAL DATA SOURCE [report_hhz131_dfs_core_windows_net] \n\tWITH (\n\t\tLOCATION = 'abfss://report@hhz131.dfs.core.windows.net' \n\t)\nGO\n\nCREATE EXTERNAL TABLE dbo.AgencyCompensation (\n\t[ID] bigint,\n\t[Level] nvarchar(4000),\n\t[ Base Salary ] nvarchar(4000),\n\t[ Insured Base Salary ] nvarchar(4000),\n\t[ Basic Performance ] nvarchar(4000),\n\t[Performance_Pre-owned] nvarchar(4000),\n\t[Commission_Rate_Pre-owned] nvarchar(4000),\n\t[ Commission_Pre-owned ] nvarchar(4000),\n\t[Performance_Rental] nvarchar(4000),\n\t[Commission_Rate_Rental] nvarchar(4000),\n\t[ Commission_Rental ] nvarchar(4000),\n\t[Performance_New] nvarchar(4000),\n\t[Commission_Rate_New] nvarchar(4000),\n\t[ Commission_New ] nvarchar(4000),\n\t[Performance_Other] nvarchar(4000),\n\t[Commission_Rate_Other] nvarchar(4000),\n\t[ Commission_Other ] nvarchar(4000),\n\t[ Business Partner Commission ] nvarchar(4000),\n\t[ Team Performance ] nvarchar(4000),\n\t[Management Commission Rate] nvarchar(4000),\n\t[ Management Commission ] nvarchar(4000),\n\t[ Total Salary ] nvarchar(4000),\n\t[ Delayed Payment Balance_Open ] nvarchar(4000),\n\t[ Delayed Payment ] nvarchar(4000),\n\t[ Back Payment ] nvarchar(4000),\n\t[ Net Payment ] nvarchar(4000),\n\t[ Delayed Payment Balance_Close ] nvarchar(4000),\n\t[ Other Income ] nvarchar(4000),\n\t[ Other Deduction ] nvarchar(4000),\n\t[ 401K ] nvarchar(4000),\n\t[ Advance Salary Balance_Open ] nvarchar(4000),\n\t[ Advance ] nvarchar(4000),\n\t[ Repayment ] nvarchar(4000),\n\t[ Advance Salary Balance_Close ] nvarchar(4000),\n\t[ Fixed_Salary ] nvarchar(4000),\n\t[ Commission ] nvarchar(4000),\n\t[ Total ] nvarchar(4000)\n\t)\n\tWITH (\n\tLOCATION = 'agency-compensation/2023-01/01_salary_submission_details_v1.csv',\n\tDATA_SOURCE = [report_hhz131_dfs_core_windows_net],\n\tFILE_FORMAT = [SynapseDelimitedTextFormat]\n\t)\nGO\n\nSELECT TOP 100 * FROM dbo.AgencyCompensation\nGO",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"databaseName": "ExternalDB",
+						"poolName": "Built-in"
+					},
+					"resultLimit": 5000
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/load-agency-fact')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "CREATE PROCEDURE LoadAgencyCompensationData\nAS\nBEGIN\n    -- Turn off the showplan to prevent showing execution plans in the results\n    SET SHOWPLAN_XML OFF;\n    \n    BEGIN TRY\n        -- Truncate the fact table before inserting new data\n        TRUNCATE TABLE dbo.fact_agencycompensation;\n\n        -- Insert data from staging table to fact table\n        INSERT INTO dbo.fact_agencycompensation\n        SELECT * \n        FROM dbo.staging_agencycompensation;\n\n        -- Optionally, return the data from the fact table (for verification purposes)\n        SELECT * \n        FROM dbo.fact_agencycompensation;\n\n        -- Log a message indicating the operation was successful\n        PRINT 'Data successfully loaded into fact_agencycompensation';\n\n    END TRY\n    BEGIN CATCH\n        -- If an error occurs, capture the error message and log it\n        PRINT 'Error occurred: ' + ERROR_MESSAGE();\n        -- Optionally, raise the error so it can be caught outside this procedure\n        THROW;\n    END CATCH;\nEND;",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"databaseName": "venture_dashboard",
+						"poolName": "venture_dashboard"
+					},
+					"resultLimit": 5000
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/ETL')]",
+			"type": "Microsoft.Synapse/workspaces/notebooks",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"nbformat": 4,
+				"nbformat_minor": 2,
+				"bigDataPool": {
+					"referenceName": "VentureETL",
+					"type": "BigDataPoolReference"
+				},
+				"sessionProperties": {
+					"driverMemory": "28g",
+					"driverCores": 4,
+					"executorMemory": "28g",
+					"executorCores": 4,
+					"numExecutors": 2,
+					"runAsWorkspaceSystemIdentity": false,
+					"conf": {
+						"spark.dynamicAllocation.enabled": "false",
+						"spark.dynamicAllocation.minExecutors": "2",
+						"spark.dynamicAllocation.maxExecutors": "2",
+						"spark.autotune.trackingId": "a0042c49-4830-48e1-9e24-c5dc15d694e9"
+					}
+				},
+				"metadata": {
+					"saveOutput": true,
+					"enableDebugMode": false,
+					"language_info": {
+						"name": "python"
+					},
+					"a365ComputeOptions": {
+						"id": "/subscriptions/76bf0df3-12c8-4ada-a009-ef4a13d9a2fd/resourceGroups/ke-holdings/providers/Microsoft.Synapse/workspaces/venture-monthly-report-etl/bigDataPools/VentureETL",
+						"name": "VentureETL",
+						"type": "Spark",
+						"endpoint": "https://venture-monthly-report-etl.dev.azuresynapse.net/livyApi/versions/2019-11-01-preview/sparkPools/VentureETL",
+						"auth": {
+							"type": "AAD",
+							"authResource": "https://dev.azuresynapse.net",
+							"authHeader": null
+						},
+						"sparkVersion": "3.4",
+						"nodeCount": 10,
+						"cores": 4,
+						"memory": 28,
+						"extraHeader": null
+					},
+					"sessionKeepAliveTimeout": 30
+				},
+				"cells": [
+					{
+						"cell_type": "code",
+						"source": [
+							"from pyspark.sql import SparkSession\r\n",
+							"\r\n",
+							"spark = SparkSession.builder.getOrCreate()\r\n",
+							"\r\n",
+							"'''\r\n",
+							"# Define storage path (replace with your storage details)\r\n",
+							"storage_account = \"hhz131\"\r\n",
+							"container_name = \"report\"\r\n",
+							"file_path = \"agency-compensation/2023-01/01_salary_submission_details_v1.csv\"\r\n",
+							"adls_path = f\"abfss://{container_name}@{storage_account}.dfs.core.windows.net/{file_path}\"\r\n",
+							"# Read CSV\r\n",
+							"df = spark.read.csv(adls_path, header=True, inferSchema=True)\r\n",
+							"df = df.selectexpr(\"Level\", \r\n",
+							"                    \"Performance_PreOwned\", \r\n",
+							"                    \"Performance_Rental\", \r\n",
+							"                    \"Performance_New\", \r\n",
+							"                    \"Performance_Other\", \r\n",
+							"                    \"Team_Performance\",\r\n",
+							"                    \"Management_Commission\", \r\n",
+							"                    \"Fixed_Salary\", \r\n",
+							"                    \"Commission\", \r\n",
+							"                    \"Total\")\r\n",
+							"'''\r\n",
+							"\r\n",
+							"#Read data from lake database instead\r\n",
+							"table_name = \"`Database1`.`agency_202301`\"\r\n",
+							"df = spark.sql(f\"\"\"SELECT Level, \r\n",
+							"                        Performance_PreOwned, \r\n",
+							"                        Performance_Rental, \r\n",
+							"                        Performance_New, \r\n",
+							"                        Performance_Other, \r\n",
+							"                        Team_Performance,\r\n",
+							"                        Management_Commission, \r\n",
+							"                        Fixed_Salary, \r\n",
+							"                        Commission, \r\n",
+							"                        Total from {table_name}\"\"\")\r\n",
+							"\r\n",
+							"#Data Cleaning\r\n",
+							"from pyspark.sql.functions import when, col, trim, regexp_replace\r\n",
+							"from pyspark.sql.types import DecimalType, IntegerType\r\n",
+							"\r\n",
+							"value_columns = df.columns[1:]\r\n",
+							"for c in value_columns:\r\n",
+							"    df = df.withColumn(c, regexp_replace(col(c), \",\", \"\"))\r\n",
+							"    df = df.withColumn(c, when(trim(col(c)) == \"-\", 0).otherwise(trim(col(c))).cast(DecimalType(10,2)))\r\n",
+							"    df = df.fillna(0, subset=c)\r\n",
+							"\r\n",
+							"#Map Level to clustered Level\r\n",
+							"from pyspark.sql.functions import udf\r\n",
+							"from pyspark.sql.types import StringType\r\n",
+							"\r\n",
+							"def map_value(val):\r\n",
+							"    mapping_dict = {\r\n",
+							"        'A0': 'A0',\r\n",
+							"        'A1': 'A1-A4',\r\n",
+							"        'A2': 'A1-A4',\r\n",
+							"        'A3': 'A1-A4',\r\n",
+							"        'A4': 'A1-A4',\r\n",
+							"        'A5': 'A5-A10',\r\n",
+							"        'A6': 'A5-A10',\r\n",
+							"        'A7': 'A5-A10',\r\n",
+							"        'A8': 'A5-A10',\r\n",
+							"        'A9': 'A5-A10',\r\n",
+							"        'A10': 'A5-A10',\r\n",
+							"        'M': 'M',\r\n",
+							"        'M1': 'M',\r\n",
+							"        'M2': 'M',\r\n",
+							"        'M3': 'M',\r\n",
+							"        'M4': 'M',\r\n",
+							"        'M5': 'M',\r\n",
+							"        'M6': 'M',\r\n",
+							"        'M7': 'M',\r\n",
+							"        'M8': 'M',\r\n",
+							"        'M9': 'M',\r\n",
+							"        'M10': 'M',\r\n",
+							"        'S': 'S',\r\n",
+							"        'BP': 'Admin',\r\n",
+							"        'Owner': 'Partner'\r\n",
+							"    }\r\n",
+							"    return mapping_dict.get(val, val)\r\n",
+							"\r\n",
+							"map_udf = udf(map_value, StringType())\r\n",
+							"df = df.withColumn(\"Level_Clustered\", map_udf(df[\"Level\"]))\r\n",
+							"\r\n",
+							"#Add one more column for total sales\r\n",
+							"from pyspark.sql.functions import col\r\n",
+							"df = df.withColumn(\"Total_Sales\", col('Performance_PreOwned') + col('Performance_Rental') + col('Performance_New') + col('Performance_Other'))\r\n",
+							"\r\n",
+							"#group by clustered level\r\n",
+							"from pyspark.sql.functions import sum, count\r\n",
+							"\r\n",
+							"#aggregate\r\n",
+							"columns_to_sum = [\"Team_Performance\",\r\n",
+							"                    \"Management_Commission\", \r\n",
+							"                    \"Fixed_Salary\", \r\n",
+							"                    \"Commission\",\r\n",
+							"                    \"Total_Sales\", \r\n",
+							"                    \"Total\"]\r\n",
+							"\r\n",
+							"df_grouped = df.groupBy(\"Level_Clustered\").agg(count(\"Level_Clustered\").alias(\"Head_Count\"),*[sum(c).alias(c) for c in columns_to_sum])\r\n",
+							"df_grouped.show()"
+						],
+						"outputs": [],
+						"execution_count": 5
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"#cast to match the schema of staging table       #TODO: maybe consider a automated process to match the schema to database?\r\n",
+							"from pyspark.sql.types import DecimalType, IntegerType\r\n",
+							"\r\n",
+							"# Cast Head_Count to Integer and cast other numeric columns to Decimal(30,2)\r\n",
+							"df_grouped = df_grouped.select(\r\n",
+							"    col(\"Level_Clustered\"), \r\n",
+							"    col(\"Head_Count\").cast(IntegerType()).alias(\"Head_Count\"),\r\n",
+							"    *[col(c).cast(DecimalType(30, 2)).alias(c) for c in df_grouped.columns if c not in [\"Level_Clustered\", \"Head_Count\"]]\r\n",
+							")\r\n",
+							"\r\n",
+							"# Check the new schema\r\n",
+							"df_grouped.printSchema()"
+						],
+						"outputs": [],
+						"execution_count": 7
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"#write to dedicated sql pool staging table\r\n",
+							"import com.microsoft.spark.sqlanalytics\r\n",
+							"df_grouped.write \\\r\n",
+							"            .mode(\"overwrite\") \\\r\n",
+							"            .synapsesql(\"venture_dashboard.dbo.staging_agencycompensation\")"
+						],
+						"outputs": [],
+						"execution_count": 13
+					}
+				]
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/sparkConfiguration_vcore')]",
+			"type": "Microsoft.Synapse/workspaces/sparkConfigurations",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"configs": {
+					"spark.executor.instances": "1",
+					"spark.executor.cores": "2",
+					"spark.driver.cores": "2"
+				},
+				"created": "2025-02-09T23:59:25.397Z",
+				"createdBy": "hha171@sfu.ca",
+				"annotations": [],
+				"configMergeRule": {
+					"artifact.currentOperation.spark.executor.instances": "replace",
+					"artifact.currentOperation.spark.executor.cores": "replace",
+					"artifact.currentOperation.spark.driver.cores": "replace"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/Database1')]",
+			"type": "Microsoft.Synapse/workspaces/databases",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"Ddls": [
+					{
+						"ActionType": "CREATE",
+						"OldEntity": null,
+						"NewEntity": {
+							"Name": "Database1",
+							"EntityType": "DATABASE",
+							"Origin": {
+								"Type": "SPARK"
+							},
+							"Properties": {
+								"IsSyMSCDMDatabase": true
+							},
+							"Source": {
+								"Provider": "ADLS",
+								"Location": "abfss://report@hhz131.dfs.core.windows.net/Database1",
+								"Properties": {
+									"FormatType": "csv",
+									"LinkedServiceName": "venture-monthly-report-etl-WorkspaceDefaultStorage"
+								}
+							},
+							"PublishStatus": "PUBLISHED",
+							"ObjectVersion": 3,
+							"ObjectId": "68c10326-5aec-453f-bc97-05256cb24063"
+						},
+						"Source": {
+							"Type": "SPARK"
+						}
+					},
+					{
+						"ActionType": "CREATE",
+						"OldEntity": null,
+						"NewEntity": {
+							"Name": "agency_202301",
+							"EntityType": "TABLE",
+							"TableType": "EXTERNAL",
+							"Namespace": {
+								"SchemaName": null,
+								"DatabaseName": "Database1",
+								"DatabaseId": null
+							},
+							"Partitioning": {
+								"PartitionFunctionType": null,
+								"Keys": null
+							},
+							"StorageDescriptor": {
+								"Distribution": null,
+								"Columns": [
+									{
+										"Name": "ID",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "long",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 0,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "long"
+											}
+										}
+									},
+									{
+										"Name": "Level",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Base_Salary",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Insured_Base_Salary",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Basic_Performance",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Performance_PreOwned",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Rate_PreOwned",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_PreOwned",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Performance_Rental",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Rate_Rental",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Rental",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Performance_New",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Rate_New",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_New",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Performance_Other",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Rate_Other",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission_Other",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Admin_Commission",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Team_Performance",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Management_Commission_Rate",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Management_Commission",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Total_Salary",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Delayed_Payment_Balance_Open",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Delayed_Payment",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Back_Payment",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Net_Payment",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Delayed_Payment_Balance_Close",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Other_Income",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Other_Deduction",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "401K",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Advance_Salary_Balance_Open",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Advance",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Repayment",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Advance_Salary_Balance_Close",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Fixed_Salary",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Commission",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									},
+									{
+										"Name": "Total",
+										"Description": null,
+										"OriginDataTypeName": {
+											"TypeName": "string",
+											"IsComplexType": false,
+											"IsNullable": true,
+											"Length": 256,
+											"Precision": 0,
+											"Scale": 0,
+											"Properties": {
+												"HIVE_TYPE_STRING": "string"
+											}
+										}
+									}
+								],
+								"ColumnSetEntityName": "6ab2bd9e-b631-4cf3-89b8-7002a31687a2",
+								"Format": {
+									"InputFormat": "org.apache.hadoop.mapred.SequenceFileInputFormat",
+									"OutputFormat": "org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat",
+									"FormatType": "csv",
+									"SerializeLib": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+									"Properties": {
+										"path": "abfss://report@hhz131.dfs.core.windows.net/agency-compensation/2023-01/01_salary_submission_details_v1.csv",
+										"delimiter": ",",
+										"firstRowAsHeader": "true",
+										"multiLine": "false",
+										"serialization.format": "1",
+										"FormatTypeSetToDatabaseDefault": false,
+										"header": "true"
+									}
+								},
+								"Source": {
+									"Provider": "ADLS",
+									"Location": "abfss://report@hhz131.dfs.core.windows.net/agency-compensation/2023-01/01_salary_submission_details_v1.csv",
+									"Properties": {
+										"LinkedServiceName": "venture-monthly-report-etl-WorkspaceDefaultStorage",
+										"LocationSetToDatabaseDefault": false
+									}
+								},
+								"Properties": {
+									"textinputformat.record.delimiter": ",",
+									"compression": "{\"type\":\"None\",\"level\":\"optimal\"}",
+									"derivedModelAttributeInfo": "{\"attributeReferences\":{}}"
+								},
+								"Compressed": false,
+								"SerDeInfo": null,
+								"IsStoredAsSubdirectories": false
+							},
+							"Owner": null,
+							"CreateTime": 0,
+							"LastAccessTime": 0,
+							"Retention": 0,
+							"Temporary": false,
+							"IsRewriteEnabled": false,
+							"ViewOriginalText": null,
+							"ViewExpandedText": null,
+							"Origin": {
+								"Type": "SPARK"
+							},
+							"OriginObjectId": null,
+							"IsSharedEntity": false,
+							"PublishStatus": "PUBLISHED",
+							"Properties": {
+								"Description": "",
+								"DisplayFolderInfo": "{\"name\":\"Others\",\"colorCode\":\"\"}",
+								"PrimaryKeys": "",
+								"spark.sql.sources.provider": "csv",
+								"spark.sql.sources.schema.numParts": "1",
+								"spark.sql.sources.schema.part.0": "{\"type\":\"struct\",\"fields\":[{\"name\":\"ID\",\"type\":\"long\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Level\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Base_Salary\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Insured_Base_Salary\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Basic_Performance\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Performance_PreOwned\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Rate_PreOwned\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_PreOwned\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Performance_Rental\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Rate_Rental\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Rental\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Performance_New\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Rate_New\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_New\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Performance_Other\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Rate_Other\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission_Other\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Admin_Commission\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Team_Performance\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Management_Commission_Rate\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Management_Commission\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Total_Salary\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Delayed_Payment_Balance_Open\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Delayed_Payment\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Back_Payment\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Net_Payment\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Delayed_Payment_Balance_Close\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Other_Income\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Other_Deduction\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"401K\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Advance_Salary_Balance_Open\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Advance\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Repayment\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Advance_Salary_Balance_Close\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Fixed_Salary\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Commission\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}},{\"name\":\"Total\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}}]}"
+							},
+							"ObjectVersion": 3,
+							"ObjectId": "ec556402-1719-4c96-98e3-b7a4a3371cb5",
+							"Description": ""
+						},
+						"Source": {
+							"Type": "SPARK"
+						}
+					}
+				]
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/VentureETL')]",
+			"type": "Microsoft.Synapse/workspaces/bigDataPools",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"autoPause": {
+					"enabled": true,
+					"delayInMinutes": 15
+				},
+				"autoScale": {
+					"enabled": true,
+					"maxNodeCount": 3,
+					"minNodeCount": 3
+				},
+				"nodeCount": 10,
+				"nodeSize": "Small",
+				"nodeSizeFamily": "MemoryOptimized",
+				"sparkVersion": "3.4",
+				"isComputeIsolationEnabled": false,
+				"sparkConfigProperties": {
+					"configurationType": "Artifact",
+					"filename": "sparkConfiguration_vcore",
+					"content": "{\"name\":\"sparkConfiguration_vcore\",\"properties\":{\"configs\":{\"spark.executor.instances\":\"1\",\"spark.executor.cores\":\"2\",\"spark.driver.cores\":\"2\"},\"annotations\":[],\"type\":\"Microsoft.Synapse/workspaces/sparkconfigurations\",\"description\":\"\",\"notes\":\"\",\"created\":\"2025-02-09T15:59:25.3970000-08:00\",\"createdBy\":\"hha171@sfu.ca\",\"configMergeRule\":{\"admin.currentOperation.spark.executor.instances\":\"replace\",\"admin.currentOperation.spark.executor.cores\":\"replace\",\"admin.currentOperation.spark.driver.cores\":\"replace\"}}}",
+					"time": "2025-02-10T00:07:40.9127236Z"
+				},
+				"sessionLevelPackagesEnabled": false,
+				"annotations": []
+			},
+			"dependsOn": [],
+			"location": "canadacentral"
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/venture_dashboard')]",
+			"type": "Microsoft.Synapse/workspaces/sqlPools",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"collation": "SQL_Latin1_General_CP1_CI_AS",
+				"maxSizeBytes": 263882790666240,
+				"annotations": []
+			},
+			"dependsOn": [],
+			"location": "canadacentral"
+		}
+	]
+}

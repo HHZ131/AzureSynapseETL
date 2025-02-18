@@ -1,0 +1,15 @@
+{
+	"$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"workspaceName": {
+			"value": "venture-monthly-report-etl"
+		},
+		"venture-monthly-report-etl-WorkspaceDefaultSqlServer_connectionString": {
+			"value": "Integrated Security=False;Encrypt=True;Connection Timeout=30;Data Source=tcp:venture-monthly-report-etl.sql.azuresynapse.net,1433;Initial Catalog=@{linkedService().DBName}"
+		},
+		"venture-monthly-report-etl-WorkspaceDefaultStorage_properties_typeProperties_url": {
+			"value": "https://hhz131.dfs.core.windows.net"
+		}
+	}
+}
